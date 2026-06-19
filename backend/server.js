@@ -6,9 +6,6 @@ const csv = require("csv-parser");
 const { Parser } = require("json2csv");
 
 const app = express();
-
-const cors = require("cors");
-
 app.use(
   cors({
     origin: "*",
