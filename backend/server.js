@@ -2,22 +2,32 @@ const express = require("express");
 const cors = require("cors");
 const multer = require("multer");
 const fs = require("fs");
+const path = require("path");
 const csv = require("csv-parser");
 const { Parser } = require("json2csv");
 
 const app = express();
+
 app.use(
   cors({
     origin: "*",
     methods: ["GET", "POST"],
   }),
 );
+
 app.use(express.json());
+
+// Create uploads folder automatically
+const uploadDir = path.join(__dirname, "uploads");
+
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
 
 // Multer Storage Configuration
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, "uploads/");
+    cb(null, uploadDir);
   },
 
   filename: (req, file, cb) => {
@@ -25,7 +35,15 @@ const storage = multer.diskStorage({
   },
 });
 
-const upload = multer({ storage });
+const upload = multer({
+  storage,
+  fileFilter: (req, file, cb) => {
+    if (!file.originalname.endsWith(".csv")) {
+      return cb(new Error("Only CSV files are allowed"));
+    }
+    cb(null, true);
+  },
+});
 
 // Store clean rows globally
 let latestCleanData = [];
@@ -37,77 +55,98 @@ app.get("/", (req, res) => {
 
 // Upload and Validate CSV
 app.post("/upload", upload.single("file"), (req, res) => {
-  const results = [];
-
-  fs.createReadStream(req.file.path)
-    .pipe(csv())
-    .on("data", (data) => {
-      results.push(data);
-    })
-    .on("end", () => {
-      let validRows = 0;
-      let invalidRows = 0;
-      let errors = [];
-      let cleanData = [];
-
-      results.forEach((row, index) => {
-        let isValid = true;
-
-        // Customer ID Validation
-        if (!row.customer_id || row.customer_id.trim() === "") {
-          errors.push(`Row ${index + 1} - Missing Customer ID`);
-          isValid = false;
-        }
-
-        // Full Name Validation
-        if (!row.full_name || row.full_name.trim() === "") {
-          errors.push(`Row ${index + 1} - Missing Full Name`);
-          isValid = false;
-        }
-
-        // Email Validation
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-        if (!row.email || !emailRegex.test(row.email)) {
-          errors.push(`Row ${index + 1} - Invalid Email`);
-          isValid = false;
-        }
-
-        // Phone Validation
-        const phone = String(row.phone_number).trim();
-
-        if (!/^\d{10}$/.test(phone)) {
-          errors.push(`Row ${index + 1} - Invalid Phone Number`);
-          isValid = false;
-        }
-
-        if (isValid) {
-          validRows++;
-          cleanData.push(row);
-        } else {
-          invalidRows++;
-        }
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        message: "No file uploaded",
       });
+    }
 
-      // Save for download feature
-      latestCleanData = cleanData;
+    const results = [];
 
-      res.json({
-        validRows,
-        invalidRows,
-        errors,
-        cleanData,
+    fs.createReadStream(req.file.path)
+      .pipe(csv())
+      .on("data", (data) => {
+        results.push(data);
+      })
+      .on("end", () => {
+        let validRows = 0;
+        let invalidRows = 0;
+        let errors = [];
+        let cleanData = [];
+
+        results.forEach((row, index) => {
+          let isValid = true;
+
+          // Customer ID Validation
+          if (!row.customer_id || row.customer_id.trim() === "") {
+            errors.push(`Row ${index + 2} - Missing Customer ID`);
+            isValid = false;
+          }
+
+          // Full Name Validation
+          if (!row.full_name || row.full_name.trim() === "") {
+            errors.push(`Row ${index + 2} - Missing Full Name`);
+            isValid = false;
+          }
+
+          // Email Validation
+          const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+          if (!row.email || !emailRegex.test(row.email)) {
+            errors.push(`Row ${index + 2} - Invalid Email`);
+            isValid = false;
+          }
+
+          // Phone Validation
+          const phone = String(row.phone_number || "").trim();
+
+          if (!/^\d{10}$/.test(phone)) {
+            errors.push(`Row ${index + 2} - Invalid Phone Number`);
+            isValid = false;
+          }
+
+          if (isValid) {
+            validRows++;
+            cleanData.push(row);
+          } else {
+            invalidRows++;
+          }
+        });
+
+        latestCleanData = cleanData;
+
+        // Delete uploaded file after processing
+        fs.unlink(req.file.path, (err) => {
+          if (err) console.log(err);
+        });
+
+        res.json({
+          success: true,
+          totalRows: results.length,
+          validRows,
+          invalidRows,
+          errors,
+          cleanData,
+        });
+      })
+      .on("error", (error) => {
+        console.error(error);
+
+        res.status(500).json({
+          message: "Error reading CSV file",
+        });
       });
-    })
-    .on("error", (error) => {
-      console.error(error);
+  } catch (error) {
+    console.error(error);
 
-      res.status(500).json({
-        message: "Error reading CSV file",
-      });
+    res.status(500).json({
+      message: "Server Error",
     });
+  }
 });
 
+// Download Clean CSV
 app.get("/download-clean-csv", (req, res) => {
   try {
     if (!latestCleanData.length) {
