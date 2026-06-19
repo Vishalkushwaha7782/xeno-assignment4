@@ -7,7 +7,12 @@ const { Parser } = require("json2csv");
 
 const app = express();
 
-app.use(cors());
+app.use(
+  cors({
+    origin: "*",
+    methods: ["GET", "POST"],
+  }),
+);
 app.use(express.json());
 
 // Multer Storage Configuration
