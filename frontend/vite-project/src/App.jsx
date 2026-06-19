@@ -25,7 +25,7 @@ function App() {
 
     try {
       const response = await axios.post(
-        "http://localhost:5000/upload",
+        "https://xeno-assignment4-backend.onrender.com/upload",
         formData,
       );
 
@@ -39,7 +39,10 @@ function App() {
   };
 
   const handleDownload = () => {
-    window.open("http://localhost:5000/download-clean-csv", "_blank");
+    window.open(
+      "https://xeno-assignment4-backend.onrender.com/download-clean-csv",
+      "_blank",
+    );
   };
 
   const totalRows = validationResults.validRows + validationResults.invalidRows;
