@@ -17,50 +17,70 @@ app.use(
 
 app.use(express.json());
 
-// Create uploads folder automatically
+// =====================
+// Create uploads folder
+// =====================
+
 const uploadDir = path.join(__dirname, "uploads");
 
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
 
-// Multer Storage Configuration
+console.log("Current Directory:", __dirname);
+console.log("Upload Directory:", uploadDir);
+console.log("Upload Directory Exists:", fs.existsSync(uploadDir));
+
+// =====================
+// Multer Configuration
+// =====================
+
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
+  destination: function (req, file, cb) {
     cb(null, uploadDir);
   },
 
-  filename: (req, file, cb) => {
-    cb(null, Date.now() + "-" + file.originalname);
+  filename: function (req, file, cb) {
+    cb(null, `${Date.now()}-${file.originalname}`);
   },
 });
 
 const upload = multer({
   storage,
-  fileFilter: (req, file, cb) => {
-    if (!file.originalname.endsWith(".csv")) {
-      return cb(new Error("Only CSV files are allowed"));
-    }
-    cb(null, true);
-  },
 });
 
-// Store clean rows globally
+// =====================
+// Global Clean Data
+// =====================
+
 let latestCleanData = [];
 
+// =====================
 // Test Route
+// =====================
+
 app.get("/", (req, res) => {
   res.send("Backend Running");
 });
 
-// Upload and Validate CSV
+// =====================
+// Upload Route
+// =====================
+
 app.post("/upload", upload.single("file"), (req, res) => {
   try {
+    console.log("===== UPLOAD REQUEST =====");
+    console.log("FILE RECEIVED:", req.file);
+
     if (!req.file) {
       return res.status(400).json({
+        success: false,
         message: "No file uploaded",
       });
     }
+
+    console.log("FILE PATH:", req.file.path);
+    console.log("FILE EXISTS:", fs.existsSync(req.file.path));
 
     const results = [];
 
@@ -70,6 +90,8 @@ app.post("/upload", upload.single("file"), (req, res) => {
         results.push(data);
       })
       .on("end", () => {
+        console.log("CSV READ SUCCESSFULLY");
+
         let validRows = 0;
         let invalidRows = 0;
         let errors = [];
@@ -78,19 +100,16 @@ app.post("/upload", upload.single("file"), (req, res) => {
         results.forEach((row, index) => {
           let isValid = true;
 
-          // Customer ID Validation
           if (!row.customer_id || row.customer_id.trim() === "") {
             errors.push(`Row ${index + 2} - Missing Customer ID`);
             isValid = false;
           }
 
-          // Full Name Validation
           if (!row.full_name || row.full_name.trim() === "") {
             errors.push(`Row ${index + 2} - Missing Full Name`);
             isValid = false;
           }
 
-          // Email Validation
           const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
           if (!row.email || !emailRegex.test(row.email)) {
@@ -98,7 +117,6 @@ app.post("/upload", upload.single("file"), (req, res) => {
             isValid = false;
           }
 
-          // Phone Validation
           const phone = String(row.phone_number || "").trim();
 
           if (!/^\d{10}$/.test(phone)) {
@@ -116,12 +134,14 @@ app.post("/upload", upload.single("file"), (req, res) => {
 
         latestCleanData = cleanData;
 
-        // Delete uploaded file after processing
+        // Delete uploaded file
         fs.unlink(req.file.path, (err) => {
-          if (err) console.log(err);
+          if (err) {
+            console.error("Delete Error:", err);
+          }
         });
 
-        res.json({
+        return res.json({
           success: true,
           totalRows: results.length,
           validRows,
@@ -130,27 +150,33 @@ app.post("/upload", upload.single("file"), (req, res) => {
           cleanData,
         });
       })
-      .on("error", (error) => {
-        console.error(error);
+      .on("error", (err) => {
+        console.error("CSV ERROR:", err);
 
-        res.status(500).json({
-          message: "Error reading CSV file",
+        return res.status(500).json({
+          success: false,
+          message: err.message,
         });
       });
   } catch (error) {
-    console.error(error);
+    console.error("UPLOAD ERROR:", error);
 
-    res.status(500).json({
-      message: "Server Error",
+    return res.status(500).json({
+      success: false,
+      message: error.message,
     });
   }
 });
 
+// =====================
 // Download Clean CSV
+// =====================
+
 app.get("/download-clean-csv", (req, res) => {
   try {
     if (!latestCleanData.length) {
       return res.status(400).json({
+        success: false,
         message: "No clean data available",
       });
     }
@@ -163,13 +189,18 @@ app.get("/download-clean-csv", (req, res) => {
 
     return res.send(csvData);
   } catch (error) {
-    console.error(error);
+    console.error("DOWNLOAD ERROR:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
+      success: false,
       message: "Error generating CSV",
     });
   }
 });
+
+// =====================
+// Start Server
+// =====================
 
 const PORT = process.env.PORT || 5000;
 
